@@ -13,7 +13,7 @@ const Fleet = (() => {
     const copy=JSON.parse(JSON.stringify(data));
     copy.vehicles=copy.vehicles.map(v=>{
       const [b,m]=splitName(v.name||'');
-      const out={...v};
+      const out={...v,photo:v.photo||''};
       for(const k of textKeys)out[k]=typeof v[k]==='string'?v[k]:'';
       for(const k of dateKeys)out[k]=v[k]||'';
       for(const k of numberKeys)out[k]=v[k]??null;
@@ -29,6 +29,7 @@ const Fleet = (() => {
     const validId=v=>typeof v==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(v);
     if(!data||![1,2].includes(data.schema)||!Array.isArray(data.vehicles)||!Array.isArray(data.maintenance)||!Array.isArray(data.reservations))fail();
     for(const v of data.vehicles){
+      if(v.photo!==undefined&&v.photo!==''&&(typeof v.photo!=='string'||v.photo.length>65000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(v.photo)))fail();
       if(!strings(v,['id','name','plate','category','person','status','image'])||!validId(v.id)||!v.name.trim()||!v.plate.trim()||!['Affecté','Disponible','En entretien'].includes(v.status)||!nonnegative(v.km)||!['sedan','suv','white-suv','grey-suv'].includes(v.image)||v.insurance&&!isDate(v.insurance))fail();
       if(data.schema===2){
         if(!strings(v,textKeys)||dateKeys.some(k=>v[k]!==''&&!isDate(v[k]))||numberKeys.some(k=>v[k]!==null&&!nonnegative(v[k])))fail();

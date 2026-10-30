@@ -19,7 +19,9 @@ let page='dashboard',filter='',query='',dueTab='maintenance';
 const fmt=n=>Number(n).toLocaleString('fr-FR'),date=d=>d?new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}):'—';
 const days=d=>Math.round((new Date(d+'T12:00:00')-new Date(today()+'T12:00:00'))/86400000);
 const relative=d=>days(d)<0?`${Math.abs(days(d))} j de retard`:days(d)===0?"Aujourd’hui":`dans ${days(d)} jours`;
-const vehicle=id=>state.vehicles.find(v=>v.id===id), photo=v=>`<img src="assets/${v.status==='En entretien'?'repair-compact':esc(v.image||'sedan')}.png" alt="${v.status==='En entretien'?'Véhicule en entretien, capot ouvert':''}">`;
+const vehicle=id=>state.vehicles.find(v=>v.id===id);
+const photo=v=>`<img src="${esc(v.photo||`assets/${v.status==='En entretien'?'repair-compact':v.image||'sedan'}.png`)}" class="${v.photo?'real-photo':''}" alt="${esc(v.photo?'Photo de '+v.name:v.status==='En entretien'?'Véhicule en entretien, capot ouvert':'Illustration du véhicule')}">`;
+
 const status=s=>`<span class="status ${s==='Disponible'?'available':s==='En entretien'?'maintenance':''}"><i></i>${esc(s)}</span>`;
 function toast(t){$('#toast').textContent=t;$('#toast').classList.add('visible');clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),3500)}
 function head(title,sub,action=''){return `<div class="page-head"><div><h1>${title}</h1><p>${sub}</p></div>${action||`<div class="date">${icon('calendar')}${new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div>`}</div>`}
@@ -45,13 +47,15 @@ const field=(label,name,type='text',value='',extra='')=>`<label class="field">${
 const select=(label,name,options,value='')=>`<label class="field">${label}<select name="${name}" required>${options.map(o=>{let val=Array.isArray(o)?o[0]:o,label=Array.isArray(o)?o[1]:o;return `<option value="${esc(val)}" ${String(val)===String(value)?'selected':''}>${esc(label)}</option>`}).join('')}</select></label>`;
 const vehicleOptions=(list=state.vehicles)=>list.map(v=>[v.id,`${v.name} · ${v.plate}`]);
 let formType='',editId='';
-function openForm(type,id=''){formType=type;editId=id;const v=vehicle(id);let html='',title='';if(type==='vehicle'){title=v?'Modifier le véhicule':'Ajouter un véhicule';html=field('Marque et modèle','name','text',v?.name||'','required maxlength="80" placeholder="Ex. Toyota Corolla"')+field('Immatriculation','plate','text',v?.plate||'','required maxlength="25" placeholder="Ex. AA-123-BF"')+select('Catégorie','category',['Berline','SUV','Pick-up','Utilitaire','Autre'],v?.category)+select('Statut','status',['Disponible','Affecté','En entretien'],v?.status)+field('Collaborateur (obligatoire si affecté)','person','text',v?.person||'','maxlength="80"')+field('Kilométrage','km','number',v?.km||0,'required min="0" step="1"')+field('Échéance de l’assurance','insurance','date',v?.insurance||'');}
+function openForm(type,id=''){formType=type;editId=id;const v=vehicle(id);
+ vehiclePhotoSession++;vehiclePhotoBusy=false;vehiclePhotoDraft=v?.photo||'';let html='',title='';if(type==='vehicle'){title=v?'Modifier le véhicule':'Ajouter un véhicule';html=field('Marque et modèle','name','text',v?.name||'','required maxlength="80" placeholder="Ex. Toyota Corolla"')+field('Immatriculation','plate','text',v?.plate||'','required maxlength="25" placeholder="Ex. AA-123-BF"')+select('Catégorie','category',['Berline','SUV','Pick-up','Utilitaire','Autre'],v?.category)+select('Statut','status',['Disponible','Affecté','En entretien'],v?.status)+field('Collaborateur (obligatoire si affecté)','person','text',v?.person||'','maxlength="80"')+field('Kilométrage','km','number',v?.km||0,'required min="0" step="1"')+field('Échéance de l’assurance','insurance','date',v?.insurance||'');}
 if(type==='assignment'){title='Nouvelle affectation';const available=state.vehicles.filter(v=>v.status==='Disponible');if(!available.length)return toast('Aucun véhicule disponible.');html=select('Véhicule disponible','vehicle',vehicleOptions(available))+field('Nom du collaborateur','person','text','','required maxlength="80"');}
 if(type==='maintenance'){title='Planifier un entretien';if(!state.vehicles.length)return toast('Ajoutez d’abord un véhicule.');html=select('Véhicule','vehicle',vehicleOptions())+field('Intervention','title','text','','required maxlength="100" placeholder="Ex. Vidange et filtres"')+field('Date prévue','date','date',today(),'required')+field('Coût prévu (FCFA)','cost','number',0,'required min="0" step="1"');}
 if(type==='reservation'){title='Nouvelle réservation';const available=state.vehicles.filter(v=>v.status==='Disponible');if(!available.length)return toast('Aucun véhicule disponible.');html=select('Véhicule','vehicle',vehicleOptions(available))+field('Collaborateur','person','text','','required maxlength="80"')+field('Début','start','date',today(),'required')+field('Fin','end','date',today(),'required')+field('Motif du déplacement','reason','text','','required maxlength="120"');}
 $('#modalTitle').textContent=title;$('#fields').innerHTML=html;$('#dialog').showModal();}
 $('#close').onclick=$('#cancel').onclick=()=>$('#dialog').close();
-$('#form').onsubmit=e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));for(const k of ['name','plate','person','title','reason']){if(k in data)data[k]=data[k].trim()}if((formType==='vehicle'&&(!data.name||!data.plate))||(formType==='assignment'&&!data.person)||(formType==='reservation'&&(!data.person||!data.reason))||(formType==='maintenance'&&!data.title))return toast('Complétez les champs obligatoires.');if(formType==='vehicle'){if(state.vehicles.some(v=>v.id!==editId&&v.plate.toUpperCase()===data.plate.trim().toUpperCase()))return toast('Cette immatriculation existe déjà.');if(data.status==='Affecté'&&!data.person.trim())return toast('Indiquez le collaborateur pour ce véhicule affecté.');const old=vehicle(editId);const rec={...data,name:data.name.trim(),plate:data.plate.trim().toUpperCase(),person:data.status==='Affecté'?data.person.trim():'',km:Number(data.km),id:editId||uid(),image:old?.image||(data.category==='Berline'?'sedan':'suv')};if(old)Object.assign(old,rec);else state.vehicles.push(rec);}
+$('#form').onsubmit=e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));for(const k of ['name','plate','person','title','reason']){if(k in data)data[k]=data[k].trim()}if((formType==='vehicle'&&(!data.name||!data.plate))||(formType==='assignment'&&!data.person)||(formType==='reservation'&&(!data.person||!data.reason))||(formType==='maintenance'&&!data.title))return toast('Complétez les champs obligatoires.');if(formType==='vehicle'){if(state.vehicles.some(v=>v.id!==editId&&v.plate.toUpperCase()===data.plate.trim().toUpperCase()))return toast('Cette immatriculation existe déjà.');if(data.status==='Affecté'&&!data.person.trim())return toast('Indiquez le collaborateur pour ce véhicule affecté.');const old=vehicle(editId);const rec={...data,name:data.name.trim(),plate:data.plate.trim().toUpperCase(),person:data.status==='Affecté'?data.person.trim():'',km:Number(data.km),id:editId||uid(),image:old?.image||(data.category==='Berline'?'sedan':'suv')};const previous=state;state=candidate;if(!save()){state=previous;return toast('La fiche n’a pas été enregistrée : stockage plein ou indisponible. Retirez la photo ou sauvegardez vos données.')}
+  $('#dialog').close();render();return toast('Fiche et photo enregistrées sur cet appareil.');}
 if(formType==='assignment'){const v=vehicle(data.vehicle);if(!v||v.status!=='Disponible')return toast('Ce véhicule n’est plus disponible.');v.status='Affecté';v.person=data.person.trim();}
 if(formType==='maintenance')state.maintenance.push({...data,id:uid(),done:false,cost:Number(data.cost)});
 if(formType==='reservation'){if(data.end<data.start)return toast('La fin doit être postérieure ou égale au début.');if(state.reservations.some(r=>r.vehicle===data.vehicle&&data.start<=r.end&&data.end>=r.start))return toast('Ce véhicule est déjà réservé sur cette période.');state.reservations.push({...data,id:uid()});}
@@ -80,15 +84,17 @@ const section=(title,content)=>`<fieldset class="form-section"><legend>${title}<
 const requiredText='required maxlength="100"';
 const integerInput='min="0" step="1"';
 const groupNote=t=>`<p class="field-note">${t}</p>`;
+let vehiclePhotoDraft='',vehiclePhotoBusy=false,vehiclePhotoSession=0;
 const frequency=v=>[v.serviceIntervalKm!==null?`${fmt(v.serviceIntervalKm)} km`:'',v.serviceIntervalMonths!==null?`${v.serviceIntervalMonths} mois`:''].filter(Boolean).join(' / ')||'Non renseignée';
 filtered=()=>state.vehicles.filter(v=>(!filter||v.status===filter)&&(!query||[v.name,v.brand,v.model,v.plate,v.person,v.userName,v.usedBy,v.entity,v.department,v.purchasedBy,v.category].join(' ').toLocaleLowerCase().includes(query.toLocaleLowerCase())));
 openForm=function(type,id=''){
  if(type!=='vehicle'&&type!=='assignment'){originalOpenForm(type,id);$('#dialog').classList.remove('wide');$('#dialog .modal-actions').style.display='flex';return;}
  formType=type;editId=id;const v=vehicle(id);
+ vehiclePhotoSession++;vehiclePhotoBusy=false;vehiclePhotoDraft=v?.photo||'';
  $('#dialog .modal-actions').style.display='flex';$('#dialog').classList.toggle('wide',type==='vehicle');
  let html='';
  if(type==='vehicle'){
-  html=section('1 · Identification du véhicule',
+  html=vehiclePhotoFields()+section('1 · Identification du véhicule',
    field('Marque *','brand','text',v?.brand||'',requiredText+' placeholder="Ex. Toyota"')+
    field('Modèle *','model','text',v?.model||'',requiredText+' placeholder="Ex. Corolla"')+
    field('Immatriculation *','plate','text',v?.plate||'','required maxlength="25"')+
@@ -120,10 +126,11 @@ openForm=function(type,id=''){
  }
  $('#modalTitle').textContent=type==='vehicle'?(v?'Modifier la fiche véhicule':'Ajouter un véhicule'):'Nouvelle affectation';
  $('#fields').innerHTML=html;$('#dialog').showModal();
+ if(type==='vehicle')bindVehiclePhoto();
 };
 $('#form').onsubmit=function(e){
  if(formType!=='vehicle'&&formType!=='assignment')return originalSubmit.call(this,e);
- e.preventDefault();const data=Object.fromEntries(new FormData(this));for(const k in data)data[k]=data[k].trim();
+ e.preventDefault();if(vehiclePhotoBusy)return toast('Patientez pendant la préparation de la photo.');const data=Object.fromEntries(new FormData(this));for(const k in data)data[k]=data[k].trim();
  if(formType==='assignment'){
   if(!data.userName)return toast('Renseignez le nom de l’utilisateur.');
   const v=vehicle(data.vehicle);if(!v||v.status!=='Disponible')return toast('Ce véhicule n’est plus disponible.');
@@ -134,10 +141,11 @@ $('#form').onsubmit=function(e){
   if(data.status==='Affecté'&&!data.userName)return toast('Renseignez le nom de l’utilisateur pour ce véhicule affecté.');
   for(const k of Fleet.numberKeys)data[k]=data[k]===''?null:Number(data[k]);
   data.km=Number(data.km);
-  const old=vehicle(editId),rec={...old,...data,id:editId||uid(),name:`${data.brand} ${data.model}`.trim(),plate:data.plate.toUpperCase(),person:data.userName,image:old?.image||(data.category==='Berline'?'sedan':'suv')};
+  const old=vehicle(editId),rec={...old,...data,id:editId||uid(),name:`${data.brand} ${data.model}`.trim(),plate:data.plate.toUpperCase(),person:data.userName,photo:vehiclePhotoDraft,image:old?.image||(data.category==='Berline'?'sedan':'suv')};
   const candidate={...state,vehicles:old?state.vehicles.map(v=>v.id===editId?rec:v):[...state.vehicles,rec]};
   try{Fleet.validate(candidate)}catch{return toast('Vérifiez les nombres et les dates : la prochaine visite ne doit pas précéder la dernière.')}
-  if(old)Object.assign(old,rec);else state.vehicles.push(rec);
+  const previous=state;state=candidate;if(!save()){state=previous;return toast('La fiche n’a pas été enregistrée : stockage plein ou indisponible. Retirez la photo ou sauvegardez vos données.')}
+  $('#dialog').close();render();return toast('Fiche et photo enregistrées sur cet appareil.');
  }
  save();$('#dialog').close();render();toast(storageOK?'Fiche enregistrée sur cet appareil.':'Modification en mémoire : exportez une sauvegarde.');
 };
@@ -184,3 +192,36 @@ render();
 
 const baseToast=toast;
 toast=function(t){if($('#dialog').open){let m=$('#formMessage');if(!m){m=document.createElement('div');m.id='formMessage';m.className='form-message';m.setAttribute('role','alert');$('#fields').prepend(m)}m.textContent=t;m.scrollIntoView({block:'nearest'})}baseToast(t)};
+
+/* Photos personnelles : compression locale, aucune transmission au dépôt GitHub. */
+function vehiclePhotoFields(){return `<fieldset class="form-section photo-section"><legend>Photo du véhicule</legend><div class="photo-editor"><img id="vehiclePhotoPreview" alt="Aperçu de la photo du véhicule" ${vehiclePhotoDraft?`src="${esc(vehiclePhotoDraft)}"`:'hidden'}><div><label class="secondary photo-picker">Choisir une photo<input id="vehiclePhotoFile" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif"></label><label class="secondary photo-picker">Prendre une photo<input id="vehiclePhotoCamera" type="file" accept="image/*" capture="environment"></label><button type="button" class="text-button" id="removeVehiclePhoto" ${vehiclePhotoDraft?'':'hidden'}>Retirer la photo</button><p id="vehiclePhotoStatus" role="status">${vehiclePhotoDraft?'Photo enregistrée.':'Aucune photo personnelle.'}</p><p class="field-note">Photo facultative, réduite automatiquement. Conservée sur cet appareil et incluse dans vos sauvegardes JSON. Sans photo, l’illustration reste affichée.</p></div></div></fieldset>`}
+async function compactVehiclePhoto(file){
+ if(!file||file.size>20*1024*1024)throw Error('Choisissez une image de moins de 20 Mo.');
+ if(file.type==='image/svg+xml'||(file.type&&!file.type.startsWith('image/')))throw Error('Choisissez une photo JPEG, PNG ou WebP.');
+ const url=URL.createObjectURL(file);
+ try{
+  const img=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('Image illisible. Essayez une photo JPEG, PNG ou WebP.'));im.src=url;});
+  if(!img.naturalWidth||!img.naturalHeight)throw Error('Image illisible.');
+  const canvas=document.createElement('canvas');
+  for(const limit of [640,480,320]){
+   const scale=Math.min(1,limit/Math.max(img.naturalWidth,img.naturalHeight));
+   canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+   const ctx=canvas.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);
+   for(const quality of [.78,.6,.42]){const data=canvas.toDataURL('image/jpeg',quality);if(data.length<=65000)return data;}
+  }
+  throw Error('Cette photo reste trop volumineuse. Essayez une autre image.');
+ }finally{URL.revokeObjectURL(url)}
+}
+function bindVehiclePhoto(){
+ const session=vehiclePhotoSession;let selection=0;
+ const show=message=>{const img=$('#vehiclePhotoPreview');if(!img)return;img.hidden=!vehiclePhotoDraft;if(vehiclePhotoDraft)img.src=vehiclePhotoDraft;else img.removeAttribute('src');$('#removeVehiclePhoto').hidden=!vehiclePhotoDraft;$('#vehiclePhotoStatus').textContent=message;};
+ const choose=async e=>{
+  const file=e.target.files[0];if(!file)return;
+  const token=++selection;vehiclePhotoBusy=true;$('#vehiclePhotoStatus').textContent='Préparation de la photo…';
+  try{const data=await compactVehiclePhoto(file);if(session!==vehiclePhotoSession||token!==selection)return;vehiclePhotoDraft=data;show('Photo prête. Cliquez sur Enregistrer pour la conserver.');}
+  catch(error){if(session===vehiclePhotoSession&&token===selection)show(error.message);}
+  finally{if(session===vehiclePhotoSession&&token===selection)vehiclePhotoBusy=false;e.target.value='';}
+ };
+ $('#vehiclePhotoFile').onchange=choose;$('#vehiclePhotoCamera').onchange=choose;
+ $('#removeVehiclePhoto').onclick=()=>{selection++;vehiclePhotoBusy=false;vehiclePhotoDraft='';show('Photo retirée. Cliquez sur Enregistrer pour confirmer.');};
+}
