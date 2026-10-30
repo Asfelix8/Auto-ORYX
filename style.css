@@ -13,3 +13,5 @@ dialog.wide{width:790px;max-height:92vh;padding:0;overflow:auto}dialog.wide .mod
 .import-help{font-size:12px;line-height:1.7;margin:15px 0}.import-preview{margin-top:18px;max-height:45vh}.import-preview td{white-space:normal;min-width:115px}.import-preview thead{position:sticky;top:0;z-index:1}.status:has(i){white-space:nowrap}.page-head{flex-wrap:wrap}
 
 .status.unknown i{background:#8b95a5}
+
+.danger-button{color:#b63e3e;border:1px solid #edc5c5;background:#fff5f5;padding:11px 15px;border-radius:6px;margin:5px 0 20px;font-size:12px}.danger-button:hover{background:#ffe9e9}

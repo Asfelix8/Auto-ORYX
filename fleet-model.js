@@ -21,7 +21,7 @@ const Fleet = (() => {
       if(data.schema===1){out.brand=b;out.model=m;out.userName=v.person||'';}
       return out;
     });
-    copy.schema=2;return copy;
+    copy.deletedVehicles=copy.deletedVehicles||[];copy.schema=2;return copy;
   }
   function validate(data){
     const fail=()=>{throw new Error('Sauvegarde invalide ou incompatible.');};
@@ -43,6 +43,15 @@ const Fleet = (() => {
     const hasVehicle=id=>data.vehicles.some(v=>v.id===id);
     for(const m of data.maintenance)if(!strings(m,['id','vehicle','title','date'])||!validId(m.id)||!hasVehicle(m.vehicle)||!isDate(m.date)||!nonnegative(m.cost)||typeof m.done!=='boolean')fail();
     for(const r of data.reservations)if(!strings(r,['id','vehicle','person','start','end','reason'])||!validId(r.id)||!hasVehicle(r.vehicle)||!isDate(r.start)||!isDate(r.end)||r.end<r.start)fail();
+    if(data.deletedVehicles!==undefined){
+      if(!Array.isArray(data.deletedVehicles)||data.deletedVehicles.length>10000)fail();
+      const ids=new Set();
+      for(const item of data.deletedVehicles){
+        if(!item||!validId(item.id)||ids.has(item.id)||typeof item.deletedAt!=='string'||Number.isNaN(Date.parse(item.deletedAt))||!item.vehicle||!Array.isArray(item.maintenance)||!Array.isArray(item.reservations))fail();
+        ids.add(item.id);
+        validate({schema:2,vehicles:[item.vehicle],maintenance:item.maintenance,reservations:item.reservations});
+      }
+    }
     return upgrade(data);
   }
   function dateDiff(a,b){return Math.round((Date.parse(a+'T12:00:00Z')-Date.parse(b+'T12:00:00Z'))/86400000)}
@@ -79,6 +88,21 @@ const Fleet = (() => {
     candidate.vehicles.push(...items.filter(i=>i.action==='add').map(i=>i.record));
     return {items,candidate:validate(candidate),added:items.filter(i=>i.action==='add').length,updated:items.filter(i=>i.action==='update').length,unchanged:items.filter(i=>i.action==='unchanged').length};
   }
-  return {textKeys,dateKeys,numberKeys,isDate,upgrade,validate,serviceAlerts,plateKey,planImport};
+  function archiveVehicle(current,id,deletedAt=new Date().toISOString()){
+    const data=validate(current),v=data.vehicles.find(v=>v.id===id);
+    if(!v)throw Error('Véhicule introuvable.');
+    const entry={id:'trash-'+deletedAt.replace(/[^0-9]/g,'')+'-'+data.deletedVehicles.length,deletedAt,vehicle:v,maintenance:data.maintenance.filter(m=>m.vehicle===id),reservations:data.reservations.filter(r=>r.vehicle===id)};
+    data.deletedVehicles.push(entry);data.vehicles=data.vehicles.filter(v=>v.id!==id);data.maintenance=data.maintenance.filter(m=>m.vehicle!==id);data.reservations=data.reservations.filter(r=>r.vehicle!==id);
+    return validate(data);
+  }
+  function restoreVehicle(current,trashId){
+    const data=validate(current),entry=data.deletedVehicles.find(e=>e.id===trashId);
+    if(!entry)throw Error('Cette fiche n’est plus dans la corbeille.');
+    if(data.vehicles.some(v=>v.id===entry.vehicle.id||plateKey(v.plate)===plateKey(entry.vehicle.plate)))throw Error('Un véhicule avec cette immatriculation existe déjà. Modifiez sa fiche avant de restaurer.');
+    if(entry.maintenance.some(m=>data.maintenance.some(x=>x.id===m.id))||entry.reservations.some(r=>data.reservations.some(x=>x.id===r.id)))throw Error('Un historique utilise déjà les mêmes identifiants. La restauration est bloquée pour éviter un doublon.');
+    data.vehicles.push(entry.vehicle);data.maintenance.push(...entry.maintenance);data.reservations.push(...entry.reservations);data.deletedVehicles=data.deletedVehicles.filter(e=>e.id!==trashId);
+    return validate(data);
+  }
+  return {textKeys,dateKeys,numberKeys,isDate,upgrade,validate,serviceAlerts,plateKey,planImport,archiveVehicle,restoreVehicle};
 })();
 if(typeof module!=='undefined')module.exports=Fleet;

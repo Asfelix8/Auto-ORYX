@@ -246,3 +246,24 @@ const submitBeforeImport=$('#form').onsubmit;
 $('#form').onsubmit=function(e){if(formType!=='fleet-import')return submitBeforeImport.call(this,e);e.preventDefault();if(!pendingFleetImport)return;const plan=pendingFleetImport,previous=state;state=plan.candidate;if(!save()){state=previous;return toast('Import non enregistré : stockage indisponible. Les données précédentes sont conservées.')}pendingFleetImport=null;$('#dialog').close();render();toast(plan.added+' véhicule(s) ajouté(s), '+plan.updated+' mis à jour.');};
 const openFormBeforeImport=openForm;openForm=function(...args){$('#form button[type="submit"]').textContent='Enregistrer';pendingFleetImport=null;return openFormBeforeImport(...args)};
 render();
+
+/* Suppression réversible : corbeille incluse dans les sauvegardes JSON. */
+function applyFleetChange(candidate){const previous=state;state=candidate;if(save())return true;state=previous;toast('Changement non enregistré. Les données précédentes sont conservées.');return false;}
+function removeVehicleToTrash(id){
+ const v=vehicle(id);if(!v)return;
+ const n=state.maintenance.filter(m=>m.vehicle===id).length,r=state.reservations.filter(x=>x.vehicle===id).length;
+ if(!confirm('Supprimer '+v.name+' — '+v.plate+' du parc actif ?\n\nLa fiche enregistrée, sa photo, '+n+' entretien(s) et '+r+' réservation(s) seront déplacés dans la corbeille. Vous pourrez tout restaurer. Les changements non enregistrés du formulaire seront ignorés.'))return;
+ try{if(!applyFleetChange(Fleet.archiveVehicle(state,id)))return;vehiclePhotoSession++;vehiclePhotoBusy=false;$('#dialog').close();render();toast('Véhicule déplacé dans la corbeille.');}catch(error){toast(error.message)}
+}
+function openFleetTrash(){
+ formType='trash';vehiclePhotoSession++;vehiclePhotoBusy=false;$('#modalTitle').textContent='Corbeille des véhicules';$('#dialog').classList.add('wide');$('#dialog .modal-actions').style.display='none';
+ const items=state.deletedVehicles||[];
+ $('#fields').innerHTML='<p class="import-help">Ces véhicules ne sont plus dans le parc actif. Leur photo et leur historique sont conservés. La corbeille est incluse dans vos sauvegardes JSON.</p><div class="table-wrap"><table><thead><tr><th>Véhicule</th><th>Immatriculation</th><th>Historique conservé</th><th>Action</th></tr></thead><tbody>'+items.map(item=>`<tr><td>${esc(item.vehicle.name)}</td><td>${esc(item.vehicle.plate)}</td><td>${item.maintenance.length} entretien(s), ${item.reservations.length} réservation(s)</td><td><button type="button" class="secondary" data-restore-vehicle="${esc(item.id)}">Restaurer</button></td></tr>`).join('')+(items.length?'':'<tr><td colspan="4" class="empty">La corbeille est vide.</td></tr>')+'</tbody></table></div>';
+ $('#dialog').showModal();
+ $('#fields').querySelectorAll('[data-restore-vehicle]').forEach(button=>button.onclick=()=>{try{if(!applyFleetChange(Fleet.restoreVehicle(state,button.dataset.restoreVehicle)))return;$('#dialog').close();render();toast('Véhicule, photo et historique restaurés.');}catch(error){toast(error.message)}});
+}
+const formBeforeTrash=openForm;
+openForm=function(type,id=''){formBeforeTrash(type,id);if(type==='vehicle'&&id&&vehicle(id)&&$('#dialog').open){const button=document.createElement('button');button.type='button';button.className='danger-button';button.id='deleteVehicle';button.textContent='Supprimer ce véhicule';button.onclick=()=>removeVehicleToTrash(id);$('#fields').append(button);}};
+const renderBeforeTrash=render;
+render=function(){renderBeforeTrash();if(page==='vehicles'){const add=$('[data-add="vehicle"]');if(add){const button=document.createElement('button');button.type='button';button.className='secondary';button.id='openFleetTrash';button.textContent='Corbeille ('+(state.deletedVehicles||[]).length+')';button.onclick=openFleetTrash;add.parentElement.append(button);}}};
+render();
