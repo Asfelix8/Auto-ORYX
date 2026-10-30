@@ -260,6 +260,18 @@ function openFleetTrash(){
  const items=state.deletedVehicles||[];
  $('#fields').innerHTML='<p class="import-help">Ces véhicules ne sont plus dans le parc actif. Leur photo et leur historique sont conservés. La corbeille est incluse dans vos sauvegardes JSON.</p><div class="table-wrap"><table><thead><tr><th>Véhicule</th><th>Immatriculation</th><th>Historique conservé</th><th>Action</th></tr></thead><tbody>'+items.map(item=>`<tr><td>${esc(item.vehicle.name)}</td><td>${esc(item.vehicle.plate)}</td><td>${item.maintenance.length} entretien(s), ${item.reservations.length} réservation(s)</td><td><button type="button" class="secondary" data-restore-vehicle="${esc(item.id)}">Restaurer</button></td></tr>`).join('')+(items.length?'':'<tr><td colspan="4" class="empty">La corbeille est vide.</td></tr>')+'</tbody></table></div>';
  $('#dialog').showModal();
+ if(items.length){
+  const counts={vehicles:items.length,maintenance:items.reduce((n,e)=>n+e.maintenance.length,0),reservations:items.reduce((n,e)=>n+e.reservations.length,0),photos:items.filter(e=>e.vehicle.photo).length};
+  $('#fields').insertAdjacentHTML('beforeend',`<section class="purge-section"><h3>Vider la corbeille</h3><p>Effacement définitif de <strong>${counts.vehicles} véhicule(s), ${counts.photos} photo(s), ${counts.maintenance} entretien(s) et ${counts.reservations} réservation(s)</strong> de la corbeille. Les véhicules du parc actif restent conservés.</p><p>Pour pouvoir récupérer ces fiches plus tard, téléchargez une sauvegarde avant de continuer.</p><button type="button" class="secondary" id="backupBeforeEmpty">Sauvegarder mes données</button><label class="field" for="emptyTrashWord">Écrivez VIDER pour activer le bouton<input id="emptyTrashWord" type="text" autocomplete="off" spellcheck="false" maxlength="5" placeholder="VIDER"></label><button type="button" class="danger-button" id="emptyFleetTrash" disabled>Vider définitivement la corbeille</button><p>Cette opération ne supprime pas les sauvegardes déjà téléchargées.</p></section>`);
+  $('#backupBeforeEmpty').onclick=backup;
+  $('#emptyTrashWord').onkeydown=e=>{if(e.key==='Enter')e.preventDefault()};
+  $('#emptyTrashWord').oninput=e=>{$('#emptyFleetTrash').disabled=e.target.value!=='VIDER'};
+  $('#emptyFleetTrash').onclick=()=>{
+   if($('#emptyTrashWord').value!=='VIDER')return;
+   if(!confirm('Vider définitivement la corbeille ?\n\n'+counts.vehicles+' véhicule(s), '+counts.photos+' photo(s), '+counts.maintenance+' entretien(s) et '+counts.reservations+' réservation(s) seront effacés. Cette action ne peut pas être annulée depuis la corbeille. Une sauvegarde antérieure sera nécessaire pour les récupérer.'))return;
+   try{if(!applyFleetChange(Fleet.emptyTrash(state)))return;$('#dialog').close();render();openFleetTrash();toast('Corbeille vidée. Les véhicules du parc actif sont conservés.');}catch(error){toast(error.message)}
+  };
+ }
  $('#fields').querySelectorAll('[data-restore-vehicle]').forEach(button=>button.onclick=()=>{try{if(!applyFleetChange(Fleet.restoreVehicle(state,button.dataset.restoreVehicle)))return;$('#dialog').close();render();toast('Véhicule, photo et historique restaurés.');}catch(error){toast(error.message)}});
 }
 const formBeforeTrash=openForm;

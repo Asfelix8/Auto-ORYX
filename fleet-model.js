@@ -103,6 +103,7 @@ const Fleet = (() => {
     data.vehicles.push(entry.vehicle);data.maintenance.push(...entry.maintenance);data.reservations.push(...entry.reservations);data.deletedVehicles=data.deletedVehicles.filter(e=>e.id!==trashId);
     return validate(data);
   }
-  return {textKeys,dateKeys,numberKeys,isDate,upgrade,validate,serviceAlerts,plateKey,planImport,archiveVehicle,restoreVehicle};
+  function emptyTrash(current){const data=validate(current);return {...data,deletedVehicles:[]};}
+  return {textKeys,dateKeys,numberKeys,isDate,upgrade,validate,serviceAlerts,plateKey,planImport,archiveVehicle,restoreVehicle,emptyTrash};
 })();
 if(typeof module!=='undefined')module.exports=Fleet;
