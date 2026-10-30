@@ -21,7 +21,7 @@ const Fleet = (() => {
       if(data.schema===1){out.brand=b;out.model=m;out.userName=v.person||'';}
       return out;
     });
-    copy.deletedVehicles=copy.deletedVehicles||[];copy.schema=2;return copy;
+    copy.exitedVehicles=copy.exitedVehicles||[];copy.deletedVehicles=copy.deletedVehicles||[];copy.schema=2;return copy;
   }
   function validate(data){
     const fail=()=>{throw new Error('Sauvegarde invalide ou incompatible.');};
@@ -52,6 +52,15 @@ const Fleet = (() => {
         validate({schema:2,vehicles:[item.vehicle],maintenance:item.maintenance,reservations:item.reservations});
       }
     }
+    if(data.exitedVehicles!==undefined){
+      if(!Array.isArray(data.exitedVehicles)||data.exitedVehicles.length>10000)fail();
+      const exitIds=new Set(),plates=new Set();
+      for(const item of data.exitedVehicles){
+        if(!item||!validId(item.id)||exitIds.has(item.id)||!item.vehicle||!Array.isArray(item.maintenance)||!Array.isArray(item.reservations)||!validExitMeta(item)||typeof item.cancelledAt!=='string'||typeof item.cancellationReason!=='string'||item.cancellationReason.length>1000||item.cancelledAt&&(!isDate(item.cancelledAt)||!item.cancellationReason.trim()))fail();
+        exitIds.add(item.id);validate({schema:2,vehicles:[item.vehicle],maintenance:item.maintenance,reservations:item.reservations});
+        if(!item.cancelledAt){const key=plateKey(item.vehicle.plate);if(plates.has(key)||data.vehicles.some(v=>v.id===item.vehicle.id||plateKey(v.plate)===key))fail();plates.add(key);}
+      }
+    }
     return upgrade(data);
   }
   function dateDiff(a,b){return Math.round((Date.parse(a+'T12:00:00Z')-Date.parse(b+'T12:00:00Z'))/86400000)}
@@ -77,6 +86,7 @@ const Fleet = (() => {
       const values=Object.fromEntries(importKeys.map(k=>[k,row[k].trim()]));
       if(!values.brand||!values.model||!values.plate||!plateKey(values.plate)||values.firstRegistration&&!isDate(values.firstRegistration))fail('Vérifiez marque, modèle, immatriculation et date de mise en circulation.');
       const key=plateKey(values.plate);if(seen.has(key))fail('Immatriculation en double dans le fichier : '+values.plate);seen.add(key);
+      if(previous.exitedVehicles.some(e=>!e.cancelledAt&&plateKey(e.vehicle.plate)===key))fail('Ce véhicule est déjà sorti du parc : '+values.plate+'. Consultez Sorties du parc.');
       const old=previous.vehicles.find(v=>plateKey(v.plate)===key);
       const name=values.brand+' '+values.model;
       const changed=old&&importKeys.some(k=>(old[k]||'')!==values[k]);
@@ -104,6 +114,29 @@ const Fleet = (() => {
     return validate(data);
   }
   function emptyTrash(current){const data=validate(current);return {...data,deletedVehicles:[]};}
-  return {textKeys,dateKeys,numberKeys,isDate,upgrade,validate,serviceAlerts,plateKey,planImport,archiveVehicle,restoreVehicle,emptyTrash};
+  const exitReasons=['Vente / cession','Mise au rebut','Restitution','Transfert hors parc'];
+  function validAttachment(a){return a===null||a&&typeof a.name==='string'&&a.name.length<=200&&typeof a.data==='string'&&((a.type==='image/jpeg'&&a.data.length<=65000&&/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(a.data))||(a.type==='application/pdf'&&a.data.length<=410000&&/^data:application\/pdf;base64,[A-Za-z0-9+/]+={0,2}$/.test(a.data)));}
+  function validExitMeta(m){return m&&exitReasons.includes(m.reason)&&isDate(m.date)&&typeof m.beneficiary==='string'&&m.beneficiary.length<=200&&(m.reason==='Mise au rebut'||m.beneficiary.trim())&&typeof m.notes==='string'&&m.notes.length<=2000&&typeof m.reference==='string'&&m.reference.length<=120&&(m.amount===null||Number.isSafeInteger(m.amount)&&m.amount>=0)&&(m.km===null||Number.isSafeInteger(m.km)&&m.km>=0)&&validAttachment(m.attachment);}
+  function recordExit(current,vehicleId,meta,limit=new Date().toISOString().slice(0,10)){
+    const data=validate(current),v=data.vehicles.find(v=>v.id===vehicleId);
+    if(!v)throw Error('Ce véhicule n’est plus dans le parc actif.');
+    if(!validExitMeta(meta))throw Error('Vérifiez le motif, le bénéficiaire, les dates, les montants et le justificatif.');
+    if(meta.date>limit)throw Error('La sortie ne peut pas être datée dans le futur.');
+    if(v.firstRegistration&&meta.date<v.firstRegistration)throw Error('La sortie ne peut pas précéder la mise en circulation.');
+    if(meta.km!==null&&v.km!==null&&meta.km<v.km)throw Error('Le kilométrage de sortie ne peut pas être inférieur au kilométrage enregistré.');
+    const entry={...meta,id:'exit-'+Date.now()+'-'+data.exitedVehicles.length,vehicle:{...v,km:meta.km??v.km},maintenance:data.maintenance.filter(m=>m.vehicle===v.id),reservations:data.reservations.filter(r=>r.vehicle===v.id),cancelledAt:'',cancellationReason:''};
+    data.exitedVehicles.push(entry);data.vehicles=data.vehicles.filter(x=>x.id!==v.id);data.maintenance=data.maintenance.filter(m=>m.vehicle!==v.id);data.reservations=data.reservations.filter(r=>r.vehicle!==v.id);
+    return validate(data);
+  }
+  function cancelExit(current,exitId,reason,date=new Date().toISOString().slice(0,10)){
+    const data=validate(current),entry=data.exitedVehicles.find(e=>e.id===exitId&&!e.cancelledAt);
+    if(!entry)throw Error('Cette sortie est introuvable ou déjà annulée.');
+    if(typeof reason!=='string'||!reason.trim()||reason.length>1000||!isDate(date)||date<entry.date)throw Error('Indiquez un motif d’annulation et une date valide.');
+    const v=entry.vehicle;
+    if(data.vehicles.some(x=>x.id===v.id||plateKey(x.plate)===plateKey(v.plate)))throw Error('Cette immatriculation existe déjà dans le parc actif.');
+    if(entry.maintenance.some(m=>data.maintenance.some(x=>x.id===m.id))||entry.reservations.some(r=>data.reservations.some(x=>x.id===r.id)))throw Error('Un historique utilise déjà les mêmes identifiants.');
+    data.vehicles.push(v);data.maintenance.push(...entry.maintenance);data.reservations.push(...entry.reservations);entry.cancelledAt=date;entry.cancellationReason=reason.trim();return validate(data);
+  }
+  return {textKeys,dateKeys,numberKeys,isDate,upgrade,validate,serviceAlerts,plateKey,planImport,archiveVehicle,restoreVehicle,emptyTrash,exitReasons,recordExit,cancelExit};
 })();
 if(typeof module!=='undefined')module.exports=Fleet;
